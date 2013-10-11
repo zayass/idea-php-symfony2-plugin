@@ -17,10 +17,13 @@ import java.util.*;
 /**
  * @author Daniel Espendiller <daniel@espendiller.net>
  */
-public class PhpClassReference extends PsiReferenceBase<PsiElement> implements PsiPolyVariantReference {
+public class PhpClassReference extends PsiPolyVariantReferenceBase<PsiElement> {
 
     private String classFQN;
     private boolean provideVariants = false;
+
+    private boolean useClasses = true;
+    private boolean useInterfaces = false;
 
     public PhpClassReference(@NotNull StringLiteralExpression element) {
         super(element);
@@ -32,6 +35,11 @@ public class PhpClassReference extends PsiReferenceBase<PsiElement> implements P
         this.classFQN = classFQN;
     }
 
+    public PhpClassReference(@NotNull PsiElement element, String classFQN, boolean provideVariants) {
+        this(element, classFQN);
+        this.provideVariants = provideVariants;
+    }
+
     public PhpClassReference(@NotNull StringLiteralExpression element, boolean provideVariants) {
         this(element);
         this.provideVariants = provideVariants;
@@ -41,22 +49,24 @@ public class PhpClassReference extends PsiReferenceBase<PsiElement> implements P
     @Override
     public ResolveResult[] multiResolve(boolean incompleteCode) {
 
-        PhpIndex phpIndex = PhpIndex.getInstance(getElement().getProject());
-        Collection<PhpClass> phpClasses = phpIndex.getClassesByFQN(classFQN);
-
         List<ResolveResult> results = new ArrayList<ResolveResult>();
-        for (PhpClass phpClass : phpClasses) {
-            results.add(new PsiElementResolveResult(phpClass));
+        PhpIndex phpIndex = PhpIndex.getInstance(getElement().getProject());
+
+        if(this.useClasses) {
+            this.attachPhpClassResolveResults(phpIndex.getClassesByFQN(classFQN), results);
+        }
+
+        if(this.useInterfaces) {
+            this.attachPhpClassResolveResults(phpIndex.getInterfacesByFQN(classFQN.startsWith("\\") ? classFQN : "\\" + classFQN), results);
         }
 
         return results.toArray(new ResolveResult[results.size()]);
     }
 
-    @Nullable
-    @Override
-    public PsiElement resolve() {
-        ResolveResult[] resolveResults = multiResolve(false);
-        return resolveResults.length == 1 ? resolveResults[0].getElement() : null;
+    private void attachPhpClassResolveResults(Collection<PhpClass> phpClasses, List<ResolveResult> results) {
+        for (PhpClass phpClass : phpClasses) {
+            results.add(new PsiElementResolveResult(phpClass));
+        }
     }
 
     @NotNull
@@ -71,14 +81,46 @@ public class PhpClassReference extends PsiReferenceBase<PsiElement> implements P
             return results.toArray();
         }
 
+
+        CamelHumpMatcher camelHumpMatcher = new CamelHumpMatcher(this.classFQN);
         PhpIndex phpIndex = PhpIndex.getInstance(this.getElement().getProject());
-        for (String name : phpIndex.getAllClassNames(new CamelHumpMatcher(this.classFQN))) {
-            Collection<PhpClass> classes = phpIndex.getClassesByName(name);
-            for(PhpClass phpClass: classes) {
-                results.add(new PhpClassLookupElement(phpClass, true, PhpClassReferenceInsertHandler.getInstance()));
+
+        if(this.useClasses) {
+            for (String name : phpIndex.getAllClassNames(camelHumpMatcher)) {
+                attachPhpClassToVariants(results, phpIndex.getClassesByName(name));
+            }
+        }
+
+        // phpindex interface dont support filter
+        if(this.useInterfaces) {
+            for (String name : phpIndex.getAllInterfaceNames()) {
+
+                if(this.classFQN.length() > 0 && !name.toLowerCase().contains(this.classFQN.toLowerCase())) {
+                    continue;
+                }
+
+                attachPhpClassToVariants(results, phpIndex.getInterfacesByName(name));
+
             }
         }
 
         return results.toArray();
     }
+
+    private void attachPhpClassToVariants(List<LookupElement> results, Collection<PhpClass> phpClasses) {
+        for(PhpClass phpClass: phpClasses) {
+            results.add(new PhpClassLookupElement(phpClass, true, PhpClassReferenceInsertHandler.getInstance()));
+        }
+    }
+
+    public PhpClassReference setUseInterfaces(boolean useInterfaces) {
+        this.useInterfaces = useInterfaces;
+        return this;
+    }
+
+    public PhpClassReference setUseClasses(boolean useClasses) {
+        this.useClasses = useClasses;
+        return this;
+    }
+
 }

@@ -5,6 +5,8 @@ import com.jetbrains.php.lang.parser.PhpElementTypes;
 import com.jetbrains.php.lang.patterns.PhpPatterns;
 import com.jetbrains.php.lang.psi.elements.*;
 import fr.adrienbrault.idea.symfony2plugin.assistant.AssistantReferenceContributor;
+import fr.adrienbrault.idea.symfony2plugin.form.FormTypeReferenceContributor;
+import fr.adrienbrault.idea.symfony2plugin.util.PhpElementsUtil;
 import fr.adrienbrault.idea.symfony2plugin.util.PsiElementUtils;
 
 public class DefaultReferenceContributor {
@@ -16,6 +18,24 @@ public class DefaultReferenceContributor {
         new AssistantReferenceProviderArrayKey()
     };
 
+    public enum DEFAULT_CONTRIBUTORS_ENUM {
+        PARAMETER {
+            public String toString() {
+                return "parameter";
+            }
+        },
+        ARRAY_VALUE {
+            public String toString() {
+                return "array_value";
+            }
+        },
+        ARRAY_KEY {
+            public String toString() {
+                return "array_key";
+            }
+        }
+    }
+
     private static class ParameterAssistantReferenceProvider implements AssistantReferenceContributor {
 
         @Override
@@ -25,7 +45,7 @@ public class DefaultReferenceContributor {
 
         @Override
         public String getAlias() {
-            return "parameter";
+            return DEFAULT_CONTRIBUTORS_ENUM.PARAMETER.toString();
         }
 
         @Override
@@ -40,7 +60,7 @@ public class DefaultReferenceContributor {
         }
     }
 
-    private static class AssistantReferenceProviderConfigArray implements AssistantReferenceContributor {
+    public static class AssistantReferenceProviderConfigArray implements AssistantReferenceContributor {
 
         @Override
         public boolean supportData() {
@@ -49,7 +69,7 @@ public class DefaultReferenceContributor {
 
         @Override
         public String getAlias() {
-            return "array_value";
+            return DEFAULT_CONTRIBUTORS_ENUM.ARRAY_VALUE.toString();
         }
 
         public boolean isContributedElement(PsiElement psiElement, MethodParameterSetting config) {
@@ -108,6 +128,22 @@ public class DefaultReferenceContributor {
 
             }
 
+            // on array creation key dont have value, so provide completion here also
+            // array('foo' => 'bar', '<test>')
+            if(PhpPatterns.psiElement(PhpElementTypes.ARRAY_VALUE).accepts(psiElement.getContext())) {
+                PsiElement arrayKey = psiElement.getContext();
+                if(arrayKey != null) {
+                    PsiElement arrayCreationExpression = arrayKey.getContext();
+                    if(arrayCreationExpression instanceof ArrayCreationExpression) {
+                        if(PsiElementUtils.getParameterIndexValue(arrayCreationExpression) == config.getIndexParameter()) {
+                            return true;
+                        }
+                    }
+
+                }
+
+            }
+
             return false;
         }
 
@@ -118,7 +154,7 @@ public class DefaultReferenceContributor {
 
         @Override
         public String getAlias() {
-            return "array_key";
+            return DEFAULT_CONTRIBUTORS_ENUM.ARRAY_KEY.toString();
         }
 
     }

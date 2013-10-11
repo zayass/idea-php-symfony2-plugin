@@ -7,7 +7,7 @@ import com.intellij.psi.PsiReferenceBase;
 import com.jetbrains.php.lang.psi.elements.StringLiteralExpression;
 import fr.adrienbrault.idea.symfony2plugin.form.dict.FormTypeMap;
 import fr.adrienbrault.idea.symfony2plugin.form.dict.FormTypeServiceParser;
-import fr.adrienbrault.idea.symfony2plugin.util.ParameterBag;
+import fr.adrienbrault.idea.symfony2plugin.form.util.FormUtil;
 import fr.adrienbrault.idea.symfony2plugin.util.service.ServiceXmlParserFactory;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -20,17 +20,17 @@ import java.util.List;
  */
 public class FormTypeReference extends PsiReferenceBase<PsiElement> implements PsiReference {
 
-    private ParameterBag parameterBag = null;
+    private StringLiteralExpression element;
 
-    public FormTypeReference(@NotNull StringLiteralExpression element, ParameterBag currentParameter ) {
+    public FormTypeReference(@NotNull StringLiteralExpression element) {
         super(element);
-        parameterBag = currentParameter;
+        this.element = element;
     }
 
     @Nullable
     @Override
     public PsiElement resolve() {
-        return null;
+        return FormUtil.getFormTypeToClass(getElement().getProject(), element.getContents());
     }
 
     @NotNull
@@ -38,10 +38,6 @@ public class FormTypeReference extends PsiReferenceBase<PsiElement> implements P
     public Object[] getVariants() {
 
         List<LookupElement> lookupElements = new ArrayList<LookupElement>();
-        if(parameterBag == null || parameterBag.getIndex() != 1) {
-            return lookupElements.toArray();
-        }
-
         FormTypeServiceParser formTypeServiceParser = ServiceXmlParserFactory.getInstance(getElement().getProject(), FormTypeServiceParser.class);
 
         FormTypeMap map = formTypeServiceParser.getFormTypeMap();

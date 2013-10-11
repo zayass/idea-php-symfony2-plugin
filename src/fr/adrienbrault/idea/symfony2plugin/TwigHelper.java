@@ -8,10 +8,13 @@ import com.intellij.patterns.ElementPattern;
 import com.intellij.patterns.PlatformPatterns;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.tree.IElementType;
 import com.jetbrains.php.PhpIndex;
 import com.jetbrains.twig.*;
+import fr.adrienbrault.idea.symfony2plugin.asset.dic.AssetDirectoryReader;
+import fr.adrienbrault.idea.symfony2plugin.asset.dic.AssetFile;
 import fr.adrienbrault.idea.symfony2plugin.templating.path.*;
 import fr.adrienbrault.idea.symfony2plugin.util.SymfonyBundleUtil;
 import fr.adrienbrault.idea.symfony2plugin.util.dict.SymfonyBundle;
@@ -22,15 +25,16 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * @author Adrien Brault <adrien.brault@gmail.com>
  */
 public class TwigHelper {
 
-    synchronized public static Map<String, TwigFile> getTwigFilesByName(Project project) {
-
-        Map<String, TwigFile> results = new HashMap<String, TwigFile>();
+    synchronized public static Map<String, PsiFile> getTemplateFilesByName(Project project, boolean useTwig, boolean usePhp) {
+        Map<String, PsiFile> results = new HashMap<String, PsiFile>();
         ProjectFileIndex fileIndex = ProjectFileIndex.SERVICE.getInstance(project);
 
         ArrayList<TwigPath> twigPaths = new ArrayList<TwigPath>();
@@ -40,7 +44,7 @@ public class TwigHelper {
             if(twigPath.isEnabled()) {
                 VirtualFile virtualDirectoryFile = twigPath.getDirectory(project);
                 if(virtualDirectoryFile != null) {
-                    TwigPathContentIterator twigPathContentIterator = new TwigPathContentIterator(project, twigPath);
+                    TwigPathContentIterator twigPathContentIterator = new TwigPathContentIterator(project, twigPath).setWithPhp(usePhp).setWithTwig(useTwig);
                     fileIndex.iterateContentUnderDirectory(virtualDirectoryFile, twigPathContentIterator);
                     results.putAll(twigPathContentIterator.getResults());
                 }
@@ -49,7 +53,21 @@ public class TwigHelper {
         }
 
         return results;
+    }
 
+    synchronized public static Map<String, TwigFile> getTwigFilesByName(Project project) {
+        Map<String, TwigFile> results = new HashMap<String, TwigFile>();
+        for(Map.Entry<String, PsiFile> entry: getTemplateFilesByName(project, true, true).entrySet()) {
+            if(entry.getValue() instanceof TwigFile) {
+                results.put(entry.getKey(), (TwigFile) entry.getValue());
+            }
+        }
+
+        return results;
+    }
+
+    synchronized public static Map<String, PsiFile> getTemplateFilesByName(Project project) {
+        return getTemplateFilesByName(project, true, true);
     }
 
     @Nullable
@@ -70,7 +88,20 @@ public class TwigHelper {
     }
 
     public static PsiElement[] getTemplatePsiElements(Project project, String templateName) {
-        Map<String, TwigFile> twigFiles = TwigHelper.getTwigFilesByName(project);
+
+        // both are valid names first is internal completion
+        // @TODO: provide setting for that
+        // BarBundle:Foo:steps/step_finish.html.twig
+        // BarBundle:Foo/steps:step_finish.html.twig
+
+        if(templateName.matches("^.*?:.*?:.*?/.*?$")) {
+            int lastDoublePoint = templateName.lastIndexOf(":");
+            String subFolder = templateName.substring(lastDoublePoint + 1, templateName.lastIndexOf("/"));
+            String file = templateName.substring(templateName.lastIndexOf("/") + 1);
+            templateName = templateName.substring(0, lastDoublePoint) + "/" + subFolder + ":" + file;
+        }
+
+        Map<String, PsiFile> twigFiles = TwigHelper.getTemplateFilesByName(project);
         if(!twigFiles.containsKey(templateName)) {
             return new PsiElement[0];
         }
@@ -473,6 +504,40 @@ public class TwigHelper {
         }
 
         throw new IllegalArgumentException("no MACRO_TAG found");
+    }
+
+    public static ArrayList<VirtualFile> resolveAssetsFiles(Project project, String templateName, String... fileTypes) {
+
+
+        ArrayList<VirtualFile> virtualFiles = new ArrayList<VirtualFile>();
+
+        // {% javascripts '@SampleBundle/Resources/public/js/*' %}
+        // {% javascripts 'assets/js/*' %}
+        // {% javascripts 'assets/js/*.js' %}
+        Matcher matcher = Pattern.compile("^(.*[/\\\\])\\*([.\\w+]*)$").matcher(templateName);
+        if (!matcher.find()) {
+
+            for (final AssetFile assetFile : new AssetDirectoryReader().setFilterExtension(fileTypes).setIncludeBundleDir(true).setProject(project).getAssetFiles()) {
+                if(assetFile.toString().equals(templateName)) {
+                    virtualFiles.add(assetFile.getFile());
+                }
+            }
+
+            return virtualFiles;
+        }
+
+        String pathName = matcher.group(1);
+        String fileExtension = matcher.group(2).length() > 0 ? matcher.group(2) : null;
+
+        for (final AssetFile assetFile : new AssetDirectoryReader().setFilterExtension(fileTypes).setIncludeBundleDir(true).setProject(project).getAssetFiles()) {
+            if(fileExtension == null && assetFile.toString().matches(Pattern.quote(pathName) + "(?!.*[/\\\\]).*\\.\\w+")) {
+                virtualFiles.add(assetFile.getFile());
+            } else if(fileExtension != null && assetFile.toString().matches(Pattern.quote(pathName) + "(?!.*[/\\\\]).*" + Pattern.quote(fileExtension))) {
+                virtualFiles.add(assetFile.getFile());
+            }
+        }
+
+        return virtualFiles;
     }
 
 }

@@ -1,20 +1,22 @@
 package fr.adrienbrault.idea.symfony2plugin.dic;
 
 import com.intellij.codeInsight.lookup.LookupElement;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiPolyVariantReferenceBase;
+import com.intellij.psi.ResolveResult;
 import com.jetbrains.php.PhpIndex;
 import com.jetbrains.php.lang.psi.elements.PhpClass;
 import com.jetbrains.php.lang.psi.elements.StringLiteralExpression;
+import fr.adrienbrault.idea.symfony2plugin.util.PhpElementsUtil;
 import fr.adrienbrault.idea.symfony2plugin.util.service.ServiceXmlParserFactory;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
 /**
  * @author Adrien Brault <adrien.brault@gmail.com>
  */
-public class ServiceReference extends PsiReferenceBase<PsiElement> implements PsiPolyVariantReference {
+public class ServiceReference extends PsiPolyVariantReferenceBase<PsiElement> {
 
     private String serviceId;
 
@@ -26,10 +28,7 @@ public class ServiceReference extends PsiReferenceBase<PsiElement> implements Ps
     public ServiceReference(@NotNull StringLiteralExpression element) {
         super(element);
 
-        serviceId = element.getText().substring(
-            element.getValueRange().getStartOffset(),
-            element.getValueRange().getEndOffset()
-        ); // Remove quotes
+        serviceId = element.getContents();
     }
 
     @NotNull
@@ -42,27 +41,8 @@ public class ServiceReference extends PsiReferenceBase<PsiElement> implements Ps
             return new ResolveResult[]{};
         }
 
-        PhpIndex phpIndex = PhpIndex.getInstance(getElement().getProject());
-        Collection<PhpClass> phpClasses = phpIndex.getClassesByFQN(serviceClass);
-        Collection<PhpClass> phpInterfaces = phpIndex.getInterfacesByFQN(serviceClass);
-
-        List<ResolveResult> results = new ArrayList<ResolveResult>();
-        for (PhpClass phpClass : phpClasses) {
-            results.add(new PsiElementResolveResult(phpClass));
-        }
-        for (PhpClass phpInterface : phpInterfaces) {
-            results.add(new PsiElementResolveResult(phpInterface));
-        }
-
-        return results.toArray(new ResolveResult[results.size()]);
-    }
-
-    @Nullable
-    @Override
-    public PsiElement resolve() {
-        ResolveResult[] resolveResults = multiResolve(false);
-
-        return resolveResults.length == 1 ? resolveResults[0].getElement() : null;
+        List<ResolveResult> resolveResults = PhpElementsUtil.getClassInterfaceResolveResult(this.getElement().getProject(), serviceClass);
+        return resolveResults.toArray(new ResolveResult[resolveResults.size()]);
     }
 
     @NotNull
@@ -73,19 +53,12 @@ public class ServiceReference extends PsiReferenceBase<PsiElement> implements Ps
         PhpIndex phpIndex = PhpIndex.getInstance(getElement().getProject());
 
         List<LookupElement> results = new ArrayList<LookupElement>();
-        Iterator it = serviceMap.getPublicMap().entrySet().iterator();
-        while (it.hasNext()) {
-            Map.Entry pairs = (Map.Entry)it.next();
-            String serviceId = (String)pairs.getKey();
-            String serviceClass = (String)pairs.getValue();
-            Collection<PhpClass> phpClasses = phpIndex.getClassesByFQN(serviceClass);
+        for(Map.Entry<String, String> entry: serviceMap.getPublicMap().entrySet()) {
+            String serviceId = entry.getKey();
+            String serviceClass = entry.getValue();
+            Collection<PhpClass> phpClasses = phpIndex.getAnyByFQN(serviceClass);
             if (phpClasses.size() > 0) {
                 results.add(new ServiceLookupElement(serviceId, phpClasses.iterator().next()));
-            } else {
-                Collection<PhpClass> phpInterfaces = phpIndex.getInterfacesByFQN(serviceClass);
-                if (phpInterfaces.size() > 0) {
-                    results.add(new ServiceLookupElement(serviceId, phpInterfaces.iterator().next()));
-                }
             }
         }
 

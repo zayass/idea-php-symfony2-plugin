@@ -1,11 +1,23 @@
 package fr.adrienbrault.idea.symfony2plugin.config.xml;
 
-import com.intellij.patterns.*;
+import com.intellij.patterns.StandardPatterns;
+import com.intellij.patterns.XmlPatterns;
 import com.intellij.psi.*;
-import com.intellij.psi.xml.XmlTokenType;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.xml.*;
+import com.intellij.util.ProcessingContext;
+import com.jetbrains.php.lang.psi.elements.StringLiteralExpression;
+import fr.adrienbrault.idea.symfony2plugin.Symfony2ProjectComponent;
+import fr.adrienbrault.idea.symfony2plugin.config.ClassPublicMethodReference;
+import fr.adrienbrault.idea.symfony2plugin.config.PhpClassReference;
+import fr.adrienbrault.idea.symfony2plugin.config.component.ParameterReference;
 import fr.adrienbrault.idea.symfony2plugin.config.component.ParameterReferenceProvider;
+import fr.adrienbrault.idea.symfony2plugin.config.dic.EventDispatcherEventReference;
 import fr.adrienbrault.idea.symfony2plugin.config.xml.provider.ClassReferenceProvider;
 import fr.adrienbrault.idea.symfony2plugin.config.xml.provider.ServiceReferenceProvider;
+import fr.adrienbrault.idea.symfony2plugin.dic.TagReference;
+import fr.adrienbrault.idea.symfony2plugin.util.PsiElementUtils;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * @author Daniel Espendiller <daniel@espendiller.net>
@@ -131,7 +143,125 @@ public class XmlReferenceContributor extends PsiReferenceContributor {
             new ParameterReferenceProvider().setTrimPercent(true).setTrimQuote(true)
         );
 
+        // <tag name="kernel.event_subscriber" />
+        registrar.registerReferenceProvider(
+            XmlHelper.getTagAttributePattern("tag", "name")
+                .inside(XmlHelper.getInsideTagPattern("services"))
+            .inFile(XmlHelper.getXmlFilePattern()),
+
+            new PsiReferenceProvider() {
+
+                @NotNull
+                @Override
+                public PsiReference[] getReferencesByElement(@NotNull PsiElement element, @NotNull ProcessingContext context) {
+
+                    if(!Symfony2ProjectComponent.isEnabled(element)) {
+                        return new PsiReference[0];
+                    }
+
+                    if(element instanceof XmlAttributeValue) {
+                        return new PsiReference[] { new TagReference(element, PsiElementUtils.trimQuote(element.getText()))};
+                    }
+
+                    return new PsiReference[0];
+                }
+            }
+        );
+
+
+        // <tag event="foo" method="kernel.event_subscriber" />
+        registrar.registerReferenceProvider(
+            XmlHelper.getTagAttributePattern("tag", "method")
+                .inside(XmlHelper.getInsideTagPattern("services"))
+                .inFile(XmlHelper.getXmlFilePattern()),
+            new ClassMethodReferenceProvider()
+        );
+
+        registrar.registerReferenceProvider(
+            XmlHelper.getTagAttributePattern("call", "method")
+                .inside(XmlHelper.getInsideTagPattern("services"))
+                .inFile(XmlHelper.getXmlFilePattern()),
+            new ClassMethodReferenceProvider()
+        );
+
+        registrar.registerReferenceProvider(
+            XmlPatterns.or(
+                XmlHelper.getParameterWithClassEndingPattern()
+                    .inside(XmlHelper.getInsideTagPattern("parameters"))
+                    .inFile(XmlHelper.getXmlFilePattern()
+                )
+            ),
+            new PsiReferenceProvider() {
+
+                @NotNull
+                @Override
+                public PsiReference[] getReferencesByElement(@NotNull PsiElement element, @NotNull ProcessingContext context) {
+
+                    if(!Symfony2ProjectComponent.isEnabled(element)) {
+                        return new PsiReference[0];
+                    }
+
+                    if(element instanceof XmlToken) {
+                        return new PsiReference[] {
+                            new PhpClassReference(element, PsiElementUtils.removeIdeaRuleHack(PsiElementUtils.trimQuote(element.getText())), true)
+                        };
+                    }
+
+                    return new PsiReference[0];
+                }
+            }
+        );
+
+        registrar.registerReferenceProvider(
+            XmlHelper.getTagAttributePattern("tag", "event").inside(XmlHelper.getInsideTagPattern("services")),
+            new PsiReferenceProvider() {
+
+                @NotNull
+                @Override
+                public PsiReference[] getReferencesByElement(@NotNull PsiElement element, @NotNull ProcessingContext context) {
+
+                    if(!Symfony2ProjectComponent.isEnabled(element)) {
+                        return new PsiReference[0];
+                    }
+
+                    return new PsiReference[] {
+                        new EventDispatcherEventReference(element, PsiElementUtils.removeIdeaRuleHack(PsiElementUtils.trimQuote(element.getText())))
+                    };
+
+                }
+            }
+        );
+
     }
 
+    private class ClassMethodReferenceProvider extends PsiReferenceProvider {
+        @NotNull
+        @Override
+        public PsiReference[] getReferencesByElement(@NotNull PsiElement psiElement, @NotNull ProcessingContext context) {
+
+            if(!Symfony2ProjectComponent.isEnabled(psiElement)) {
+                return new PsiReference[0];
+            }
+
+            // check for valid xml file and services container
+            if(!XmlPatterns.psiElement().inside(XmlHelper.getInsideTagPattern("services")).inFile(XmlHelper.getXmlFilePattern()).accepts(psiElement)) {
+                return new PsiReference[0];
+            }
+
+            // search for parent service definition
+            XmlTag callXmlTag = PsiTreeUtil.getParentOfType(psiElement, XmlTag.class);
+            XmlTag xmlTag = PsiTreeUtil.getParentOfType(callXmlTag, XmlTag.class);
+            if(xmlTag == null || !xmlTag.getName().equals("service")) {
+                return new PsiReference[0];
+            }
+
+            XmlAttribute classAttribute = xmlTag.getAttribute("class");
+            if(classAttribute == null) {
+                return new PsiReference[0];
+            }
+
+            return new PsiReference[] { new ClassPublicMethodReference(psiElement, classAttribute.getValue())};
+        }
+    }
 
 }
